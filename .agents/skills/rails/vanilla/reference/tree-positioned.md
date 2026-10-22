@@ -64,12 +64,11 @@ module Positioned
   end
 
   private
-
-  # Records sharing this record's ordering scope, excluding itself.
-  # Scoped by parent_id here (pairs with Tree) — adjust for other scopes.
-  def peers
-    self.class.where(parent_id: parent_id).where.not(id: id)
-  end
+    # Records sharing this record's ordering scope, excluding itself.
+    # Scoped by parent_id here (pairs with Tree) — adjust for other scopes.
+    def peers
+      self.class.where(parent_id: parent_id).where.not(id: id)
+    end
 end
 ```
 

@@ -7,15 +7,13 @@ Use delegated types when modeling diverse content that shares common operations 
 ```ruby
 # Primary table - lightweight metadata
 class Recording < ApplicationRecord
-  delegated_type :recordable, types: %w[Message Document Comment Upload]
+  # Generic operations work across all types (copy_to, copyable? — see domain-modeling.md)
+  include Copyable
+
+  delegated_type :recordable, types: %w[ Message Document Comment Upload ]
 
   belongs_to :bucket
   belongs_to :creator, class_name: "Person"
-
-  # Generic operations work across all types
-  def copy_to(destination_bucket)
-    Recording::Copier.new(self, destination_bucket).copy
-  end
 end
 
 # Recordable tables - type-specific content
@@ -46,7 +44,7 @@ end
 - **Recording holds relationships** - Recordables stay "dumb" with just their data
 - **Capabilities system** - Ask recordable `commentable?` rather than hardcoding
 - **Efficient copying** - New recording points to same recordable (no duplication)
-- **Generic controllers** - One RecordingsController handles archive/trash/copy for all types
+- **Generic controllers** - Sub-resource controllers (`Recordings::CopiesController`, `Recordings::IncinerationsController`) work for every recordable type
 
 ## When to Use
 

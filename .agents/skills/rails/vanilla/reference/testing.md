@@ -47,7 +47,7 @@ Guidelines:
 ```ruby
 class Recordings::CopiesControllerTest < ActionDispatch::IntegrationTest
   test "copying a recording" do
-    sign_in :david
+    sign_in_as people(:david) # from the Rails 8 authentication generator
 
     assert_difference -> { buckets(:marketing).recordings.count } do
       post recording_copies_url(recordings(:launch_message)),
@@ -58,6 +58,67 @@ class Recordings::CopiesControllerTest < ActionDispatch::IntegrationTest
   end
 end
 ```
+
+## Testing Broadcasts and Frames
+
+turbo-rails adds these assertions to every test case. Refresh broadcasts go out from a background job, so run the jobs inside the block:
+
+```ruby
+class MessageTest < ActiveSupport::TestCase
+  test "a new message refreshes pages showing its bucket" do
+    bucket = buckets(:product)
+
+    assert_turbo_stream_broadcasts bucket do
+      perform_enqueued_jobs { bucket.messages.create!(subject: "Hello") }
+    end
+  end
+end
+```
+
+In integration tests, check frames in the rendered page. IDs are positional; a record plus a prefix becomes its `dom_id`:
+
+```ruby
+get bucket_url(buckets(:product))
+
+assert_turbo_frame :notifications, loading: "lazy"
+assert_turbo_frame messages(:launch), :preview do
+  assert_select "h2", text: messages(:launch).subject
+end
+```
+
+## Jobs and External HTTP
+
+Adapted from Fizzy's `test_helper.rb`:
+
+```ruby
+# test/test_helper.rb
+require "webmock/minitest"
+require "vcr"
+
+VCR.configure do |config|
+  config.cassette_library_dir = "test/vcr_cassettes"
+  config.hook_into :webmock
+  config.filter_sensitive_data("<API_KEY>") { Rails.application.credentials.api_key }
+end
+
+class ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
+  # Jobs must restore their own account (AccountTenanted in current-attributes.md),
+  # not inherit it from the test's setup.
+  def perform_enqueued_jobs(...)
+    saved_account = Current.account
+    Current.account = nil
+    super
+  ensure
+    Current.account = saved_account
+  end
+end
+```
+
+- Check that a job was queued with `assert_enqueued_with(job: Recording::IncinerationJob)`; run it with `perform_enqueued_jobs`.
+- Stub one-off HTTP calls with WebMock (`stub_request(:post, url).to_return(status: 200)`).
+- For a third-party API, record real responses once with VCR (`VCR.use_cassette("openai/summary") { ... }`) and replay them on every run.
 
 ## Testing Code That Uses Current
 

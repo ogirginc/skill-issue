@@ -18,9 +18,12 @@ Progressive enhancement with server-rendered HTML. Decision order for dynamic UI
 ```ruby
 # Model broadcasts a refresh to subscribers whenever it changes
 class Message < ApplicationRecord
-  belongs_to :bucket, touch: true
+  belongs_to :bucket, touch: true # keeps the bucket's cache keys fresh (see caching.md)
 
+  # Pages subscribed to this message (updates, destroys)
   broadcasts_refreshes
+  # Pages subscribed to its bucket (any change, including new messages)
+  broadcasts_refreshes_to :bucket
 end
 ```
 
@@ -32,10 +35,31 @@ end
 <%= turbo_stream_from @bucket %>
 ```
 
+`broadcasts_refreshes` alone never reaches a page subscribed to the parent: it sends creates to a stream named after the model (`"messages"`, shared by every tenant — see Morphing Pitfalls) and updates/destroys to the record itself. Pages that show the parent need `broadcasts_refreshes_to :parent`.
+
 The browser re-fetches the page and morphs only the changed DOM nodes — scroll, focus, and unchanged elements are preserved. This replaces most hand-written `*.turbo_stream.erb` files.
 
 - Exclude client-managed elements from morphing with `data-turbo-permanent`.
 - Reach for explicit streams only when a full-page refresh is genuinely too coarse.
+
+### Morphing Pitfalls
+
+- **Unique DOM IDs.** Morphing matches elements by `id`, so duplicates (the same partial rendered twice with `dom_id(record)`) update the wrong node. Add a prefix: `dom_id(record, :preview)`.
+- **Lazy frames.** On a morph refresh, a frame with `src` loses the content it loaded unless it's flagged `refresh: :morph`; with the flag, Turbo reloads the frame and morphs it instead:
+  ```erb
+  <%= turbo_frame_tag :notifications, src: notifications_path, loading: :lazy, refresh: :morph %>
+  ```
+- **Client-side state.** A morph resets whatever JS put into the DOM (formatted local times, restored drafts). Re-apply it on the element's `turbo:morph-element` event, which fires on each morphed element: `data-action="turbo:morph-element->local-time#refresh"`.
+- **Open dialogs.** A morph also removes attributes the server didn't render, including `open` on a dialog the user opened, which closes it. Cancel that change on `turbo:before-morph-attribute`, as the dialog controller below does (Fizzy's does the same).
+- **Streams can morph too.** `turbo_stream.replace(target, partial: "...", method: :morph)` updates in place instead of swapping the element, which avoids flicker and keeps focus and unchanged nodes.
+- **Scope collection-wide streams by account.** A stream named without a record (`turbo_stream_from :messages`) is shared by every tenant, so a change in one account refreshes every subscriber in all of them. Fizzy fixed this in PR #1800 ("Scope general broadcasts by account"):
+  ```ruby
+  broadcasts_refreshes_to ->(message) { [ message.account, :messages ] }
+  ```
+  ```erb
+  <%= turbo_stream_from Current.account, :messages %>
+  ```
+  Streams for a record (`turbo_stream_from @bucket`) are already specific to it.
 
 ## Turbo Frames for Modals and Lazy Loading
 
@@ -49,7 +73,8 @@ The browser re-fetches the page and morphs only the changed DOM nodes — scroll
 
 <%# edit.html.erb — content targeted at the frame %>
 <%= turbo_frame_tag :modal do %>
-  <dialog data-controller="dialog">
+  <dialog data-controller="dialog"
+          data-action="turbo:before-morph-attribute->dialog#preventCloseOnMorphing">
     <%= render "form", project: @project %>
   </dialog>
 <% end %>
@@ -67,6 +92,13 @@ export default class extends Controller {
 
   close() {
     this.element.close()
+  }
+
+  // A morph refresh would remove `open`, which the server never renders
+  preventCloseOnMorphing(event) {
+    if (event.detail?.attributeName === "open") {
+      event.preventDefault()
+    }
   }
 }
 ```
@@ -134,7 +166,7 @@ Default to the no-build setup — it removes an entire class of tooling problems
 
 - **importmap-rails** for JS: pin dependencies, ship ES modules as-is, no bundler, no `node_modules`.
 - **Propshaft** for assets: digest-and-serve, no compilation step.
-- Vanilla CSS (nesting and custom properties cover most of what preprocessors did).
+- Native CSS: nesting and custom properties cover most of what preprocessors did. Fizzy's Gemfile has no Sass, Tailwind, or JS bundler — only importmap-rails and Propshaft.
 
 ```ruby
 # config/importmap.rb
