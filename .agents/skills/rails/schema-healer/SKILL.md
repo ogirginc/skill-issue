@@ -1,171 +1,107 @@
 ---
 name: schema-healer
-description: Fix orphaned database migrations and schema.rb changes from abandoned branches. Use when schema.rb shows unwanted tables/columns from deleted migration files, or when "git diff db/schema.rb" shows ghost changes that keep reappearing after db:migrate.
+description: Fix orphaned Rails migrations and schema.rb / structure.sql pollution from abandoned branches. Use when db/schema.rb or db/structure.sql shows tables, columns or indexes nobody added on this branch, when "git diff db/schema.rb" shows ghost changes that reappear after db:migrate, or when db:migrate:status lists migrations as "NO FILE".
 ---
 
 # Schema Healer
 
-Fix schema.rb pollution from abandoned branches where migrations were run but never rolled back before the branch was deleted.
+Fix schema pollution from abandoned branches: their migrations ran against the local database, then the branch (and migration files) went away without rolling back.
 
-## When to Use
-
-- `git diff db/schema.rb` shows unwanted tables or columns
-- Running `db:migrate` keeps adding ghost changes to schema.rb
-- You abandoned a branch without rolling back its migrations
-- Schema.rb has tables from gems you uninstalled
-
-## Diagnosis Flow
-
-```
-git diff db/schema.rb shows changes
-           │
-    Identify added tables/columns
-           │
-    Check if migration files exist
-    for those changes
-           │
-     ┌─────┴─────┐
-   Exist      Don't exist
-     │            │
-  Normal      Orphaned!
-  changes     Need healing
-```
-
-## Step 1: Identify Orphaned Changes
-
-First, check what's different in schema.rb:
+## Step 1: Find the orphaned versions
 
 ```bash
+git status db/
 git diff db/schema.rb
-```
-
-Look for `create_table` blocks or `add_column` lines that were added (marked with `+`).
-
-## Step 2: Find Orphaned Migration Versions
-
-Rails already flags migrations that exist in the database but have no file on disk:
-
-```bash
 bin/rails db:migrate:status | grep "NO FILE"
 ```
 
-Each line is an orphaned version, shown as `up  20260123145226  ********** NO FILE **********`.
+Each `NO FILE` line (`up  20260123145226  ********** NO FILE **********`) is an orphaned version. Work only from this list: a change in the diff that doesn't trace back to one of these versions may come from a real, uncommitted migration — leave it alone.
 
-## Step 3: Confirm Before Removing Anything
+If the app uses `config.active_record.schema_format = :sql`, the polluted file is `db/structure.sql`; use it wherever this skill says `schema.rb`.
 
-The next steps are destructive. Before running them:
+## Step 2: Check it's safe
 
-1. Check the environment is local development — `bin/rails runner "puts Rails.env"`
-   must print `development`, and check `DATABASE_URL` (if set) does not point at a
-   shared database.
-2. Cross-check Steps 1 and 2: only drop tables/columns whose changes correspond to
-   the orphaned versions from Step 2. A table in the diff could come from a real,
-   not-yet-committed migration — leave those alone.
-3. Show the user the exact list of tables, columns, and migration versions to be
-   removed, and get explicit confirmation before proceeding.
+1. `bin/rails runner "puts Rails.env"` must print `development`.
+2. `DATABASE_URL`, if set, must not point at a shared database.
+3. Show the user the orphaned versions and the schema changes you believe each one made. Get explicit confirmation before changing anything.
 
-## Step 4: Drop Orphaned Tables
+## Step 3: Undo each orphaned version
 
-For each confirmed orphaned table:
+### Preferred: recover the migration file and roll it back
+
+A deleted branch's commits are often still on the remote or in the reflog. Look for the file:
 
 ```bash
-bin/rails runner "ActiveRecord::Migration.drop_table(:table_name)"
+git log --all --reflog --diff-filter=A --name-only --format=%h -- 'db/migrate/<VERSION>_*'
 ```
 
-## Step 5: Remove Orphaned Columns
-
-If only columns were added (not full tables):
+If found, restore it, roll it back, and delete it again:
 
 ```bash
-bin/rails runner "ActiveRecord::Migration.remove_column(:table_name, :column_name)"
+git show <commit>:db/migrate/<VERSION>_<name>.rb > db/migrate/<VERSION>_<name>.rb
+bin/rails db:migrate:down VERSION=<VERSION>
+rm db/migrate/<VERSION>_<name>.rb
 ```
 
-## Step 6: Clean Up schema_migrations
+`db:migrate:down` reverses exactly what the migration did and removes its `schema_migrations` row, so skip to Step 4. If `down` raises `ActiveRecord::IrreversibleMigration`, fall through to the manual path.
 
-Remove the orphaned migration version records:
+### Fallback: reverse it by hand
+
+Use this only when the file can't be recovered, and only for changes you can see in the schema diff:
+
+| Diff shows | Undo with |
+|---|---|
+| `create_table "x"` | `drop_table(:x)` |
+| `t.<type> "col"` added to an existing table | `remove_column(:table, :col)` |
+| `t.index` / `add_index` | `remove_index(:table, name: "index_name")` |
+| `add_foreign_key` | `remove_foreign_key(:from_table, :to_table)` |
+| `enable_extension "x"` | `disable_extension("x")` — check nothing else uses it |
+
+Run each through the connection:
 
 ```bash
-bin/rails runner "ActiveRecord::Base.connection.execute(\"DELETE FROM schema_migrations WHERE version IN ('VERSION1', 'VERSION2')\")"
+bin/rails runner 'ActiveRecord::Base.connection.drop_table(:ghost_table)'
 ```
 
-## Step 7: Regenerate Schema
+If `drop_table` fails because another table has a foreign key to it, remove that foreign key first. Use `drop_table(:x, force: :cascade)` only after confirming the referencing table is orphaned too.
 
-Dump a fresh schema from the cleaned database:
+**Stop and ask the user** if the diff shows a changed column type, default, null constraint, rename, or anything else that modified something that already existed. The original state can't be inferred from the diff alone, and the database may hold data the migration changed. Offer the reset in "Last resort" instead.
+
+Then delete the orphaned versions — the exact versions from Step 1, never a `LIKE` pattern:
+
+```bash
+bin/rails runner "ActiveRecord::Base.connection.execute(\"DELETE FROM schema_migrations WHERE version IN ('20260123145226', '20260123145301')\")"
+```
+
+## Step 4: Regenerate and verify
 
 ```bash
 bin/rails db:schema:dump
-```
-
-## Step 8: Verify
-
-Confirm schema.rb is now clean:
-
-```bash
 git diff db/schema.rb
-git status db/schema.rb
-```
-
-Should show no changes.
-
-## Example: Full Workflow
-
-```bash
-# 1. See what's polluting schema.rb
-git diff db/schema.rb
-# Output shows: + create_table "ghost_table" ...
-
-# 2. Find orphaned migrations
 bin/rails db:migrate:status | grep "NO FILE"
-# Output: up  20260123145226  ********** NO FILE **********
-
-# 3. Confirm environment and get user sign-off, then drop the ghost table
-bin/rails runner "ActiveRecord::Migration.drop_table(:ghost_table)"
-
-# 4. Remove orphaned migration record
-bin/rails runner "ActiveRecord::Base.connection.execute(\"DELETE FROM schema_migrations WHERE version = '20260123145226'\")"
-
-# 5. Regenerate schema
-bin/rails db:schema:dump
-
-# 6. Verify clean
-git diff db/schema.rb  # Should be empty
 ```
 
-## Common Scenarios
+Both should come back empty, apart from changes from this branch's own migrations.
 
-### Abandoned gem migrations (e.g., console1984, devise)
+## Multiple databases
+
+Rails apps with several databases (e.g. solid_queue, solid_cache, solid_cable) have one schema file and one `schema_migrations` table per database: `db/queue_schema.rb`, `db/cache_schema.rb`, etc., with migrations in `db/queue_migrate/` and so on. Run the workflow once per polluted file, using the database's name from `config/database.yml`:
+
+- `bin/rails db:migrate:status:queue`, `bin/rails db:migrate:down:queue VERSION=…`, `bin/rails db:schema:dump:queue`
+- Search the right migrations folder when recovering files: `-- 'db/queue_migrate/<VERSION>_*'`
+- For manual steps, connect to that database first:
+
+  ```bash
+  bin/rails runner 'ActiveRecord::Base.establish_connection(:queue); ActiveRecord::Base.connection.drop_table(:ghost_table)'
+  ```
+
+## Last resort: rebuild from the committed schema
+
+When the pollution is too tangled to undo, and with the user's OK — this wipes all local data in that database:
 
 ```bash
-# Drop all tables from the gem
-bin/rails runner "ActiveRecord::Migration.drop_table(:console1984_sessions)"
-bin/rails runner "ActiveRecord::Migration.drop_table(:console1984_users)"
-# ... drop all related tables
-
-# Clean up migration records
-bin/rails runner "ActiveRecord::Base.connection.execute(\"DELETE FROM schema_migrations WHERE version LIKE '202601231%'\")"
+git checkout db/schema.rb
+bin/rails db:schema:load
 ```
 
-### Single orphaned column
-
-```bash
-bin/rails runner "ActiveRecord::Migration.remove_column(:users, :abandoned_field)"
-```
-
-## Other Schema Formats and Multiple Databases
-
-- If the app uses `config.active_record.schema_format = :sql`, the polluted file is
-  `db/structure.sql` instead of `db/schema.rb`. The same workflow applies; diff and
-  dump that file instead.
-- Rails apps with multiple databases (e.g. Rails 8 with solid_queue / solid_cache /
-  solid_cable) have separate schema files like `db/queue_schema.rb` and
-  `db/cache_schema.rb`, each with its own `schema_migrations` table. Check
-  `git status db/` for all changed schema files and run the workflow per database
-  (`bin/rails db:migrate:status:queue`, etc.).
-
-## Safety Notes
-
-- Always check `git diff` first to understand what needs removal
-- Only drop tables/columns whose migration versions are confirmed orphaned (Step 3)
-- Never run this against a shared or production database — verify `Rails.env` and
-  `DATABASE_URL` first, and get explicit user confirmation before dropping anything
-- If unsure, `bin/rails db:reset` is the nuclear option — it wipes all local data, so ask first
+Restore the schema file first: `db:reset` and `db:schema:load` load whatever schema file is on disk, so running them on the polluted file recreates the ghost tables. Afterwards, re-run `bin/rails db:migrate` for this branch's own migrations and re-seed if needed.
