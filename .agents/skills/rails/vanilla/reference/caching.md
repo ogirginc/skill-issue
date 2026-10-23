@@ -38,6 +38,8 @@ Editing a message now expires the fragments for the message, its recording, and 
 
 `cached: true` fetches all of a collection's fragments in one read instead of one per item.
 
+The digest in a fragment's key covers the template and the partials it renders, but not helpers or partials rendered inside helpers. Declare such partials with a `Template Dependency:` comment, and when a helper changes, bump a `Helper Dependency Updated:` comment (`comments.md`).
+
 ## Keep Per-User Content Out of Shared Fragments
 
 A fragment cached once for everyone can't contain this person's "Edit" link, a "(you)" label, or their local time. Two ways around it:

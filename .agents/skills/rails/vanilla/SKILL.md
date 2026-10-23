@@ -1,6 +1,6 @@
 ---
 name: vanilla
-description: Apply 37signals (Basecamp/HEY/Fizzy) vanilla Rails patterns and code style including delegated types, RESTful controllers instead of custom actions, model-predicate authorization, Hotwire (Turbo morphing/frames/streams, Stimulus), CurrentAttributes with callbacks, state-as-records, caching, fixtures-based testing, and no-build frontend. Use when building Rails features, designing models, implementing polymorphic content, creating real-time UI, or structuring domain logic. Triggers on "vanilla Rails", "Basecamp-style", "37signals patterns".
+description: Apply 37signals (Basecamp/HEY/Fizzy) vanilla Rails patterns and code style including delegated types, RESTful controllers instead of custom actions, model-predicate authorization, Hotwire (Turbo morphing/frames/streams, Stimulus), CurrentAttributes with callbacks, state-as-records, caching, fixtures-based testing, no-build frontend, and sparse why-only code comments. Use when building Rails features, designing models, implementing polymorphic content, creating real-time UI, or structuring domain logic. Triggers on "vanilla Rails", "Basecamp-style", "37signals patterns".
 ---
 
 # 37signals Rails Patterns
@@ -10,6 +10,8 @@ This skill applies 37signals architectural patterns from Basecamp, HEY, and Fizz
 **When to defer:** In an existing codebase, its conventions win. If the app already uses service objects, RSpec with factories, or a JS framework, match that style — apply these patterns to new subsystems or greenfield work, not as drive-by rewrites of working code.
 
 **Code style:** before writing Ruby, read `reference/style.md` — 37signals' own conventions (expanded conditionals, method order, `private` indentation, `!`, one-line `include`, `_later`/`_now`).
+
+**Comments:** before writing or editing a comment in Ruby, ERB or Stimulus code, read `reference/comments.md` — sparse, why-only comments, concern contracts, `FIXME`/`TODO`, and the cache-digest comments in views that change behavior.
 
 ## Core Principles
 
