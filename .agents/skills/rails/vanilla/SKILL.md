@@ -9,7 +9,7 @@ This skill applies 37signals architectural patterns from Basecamp, HEY, and Fizz
 
 **When to defer:** In an existing codebase, its conventions win. If the app already uses service objects, RSpec with factories, or a JS framework, match that style — apply these patterns to new subsystems or greenfield work, not as drive-by rewrites of working code.
 
-**Code style:** before writing Ruby, read `reference/style.md` — 37signals' own conventions (expanded conditionals, method order, `private` indentation, `!`, `_later`/`_now`).
+**Code style:** before writing Ruby, read `reference/style.md` — 37signals' own conventions (expanded conditionals, method order, `private` indentation, `!`, one-line `include`, `_later`/`_now`).
 
 ## Core Principles
 

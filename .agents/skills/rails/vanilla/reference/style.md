@@ -139,6 +139,25 @@ class Event::RelayJob < ApplicationJob
 end
 ```
 
+## Including Concerns
+
+One `include` with a comma-separated list, not a line per concern. Wrap a long list with a two-space indent:
+
+```ruby
+# Bad
+class Card < ApplicationRecord
+  include Assignable
+  include Closeable
+  include Eventable
+end
+
+# Good
+class Card < ApplicationRecord
+  include Assignable, Closeable, Eventable, Pinnable, Postponable,
+    Searchable, Taggable, Watchable
+end
+```
+
 ## Formatting
 
 Fizzy uses `rubocop-rails-omakase` (Rails' default RuboCop config): double-quoted strings and spaces inside array brackets — `[ :body, :created_at ]`, `%i[ show edit ]`.

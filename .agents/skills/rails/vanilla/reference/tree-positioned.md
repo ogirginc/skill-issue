@@ -76,8 +76,7 @@ end
 
 ```ruby
 class Bucket::Pin < ApplicationRecord
-  include Tree
-  include Positioned
+  include Positioned, Tree
 
   belongs_to :user
   belongs_to :bucket
